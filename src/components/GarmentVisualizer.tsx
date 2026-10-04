@@ -7,14 +7,48 @@ interface GarmentVisualizerProps {
   config: StylingConfig;
   evaluation: CulturalEvaluation;
   outfitTitle: string;
+  viewMode?: 'mannequin' | 'anywear_camera';
+  onViewModeChange?: (mode: 'mannequin' | 'anywear_camera') => void;
 }
 
 export const GarmentVisualizer: React.FC<GarmentVisualizerProps> = ({
   config,
   evaluation,
-  outfitTitle
+  outfitTitle,
+  viewMode: propViewMode,
+  onViewModeChange
 }) => {
-  const [viewMode, setViewMode] = useState<'mannequin' | 'anywear_camera'>('mannequin');
+  const [internalViewMode, setInternalViewMode] = useState<'mannequin' | 'anywear_camera'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('viet_phuc_visualizer_mode');
+        if (saved === 'mannequin' || saved === 'anywear_camera') {
+          return saved;
+        }
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+    return 'anywear_camera'; // Default to camera as requested
+  });
+
+  const viewMode = propViewMode !== undefined ? propViewMode : internalViewMode;
+
+  const setViewMode = (mode: 'mannequin' | 'anywear_camera') => {
+    if (onViewModeChange) {
+      onViewModeChange(mode);
+    } else {
+      setInternalViewMode(mode);
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('viet_phuc_visualizer_mode', mode);
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+  };
+
   const [activePin, setActivePin] = useState<string | null>(null);
 
   const isLeftLapelError = config.lapelDirection === 'left';

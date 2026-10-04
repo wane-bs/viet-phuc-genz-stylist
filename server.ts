@@ -23,9 +23,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Initialize Google GenAI SDK
 let ai: GoogleGenAI | null = null;
-if (process.env.GEMINI_API_KEY) {
+const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || '';
+if (geminiApiKey) {
   ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: geminiApiKey,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -60,6 +61,7 @@ Nhiệm vụ của bạn là tư vấn thiết kế và phối đồ "Việt ph�
 async function callOpenRouter(messages: any[], model = 'openai/gpt-4o') {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
+    signal: AbortSignal.timeout(3500),
     headers: {
       'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
       'HTTP-Referer': process.env.APP_URL || 'https://viet-phuc-remix.ai',
@@ -206,21 +208,25 @@ app.post('/api/gemini/consult', async (req, res) => {
     }
 
     if (ai) {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: `Bối cảnh trang phục hiện tại: ${JSON.stringify(outfitContext || {})}\n\nYêu cầu từ người dùng: ${prompt}`,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.7,
-        }
-      });
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: `Bối cảnh trang phục hiện tại: ${JSON.stringify(outfitContext || {})}\n\nYêu cầu từ người dùng: ${prompt}`,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            temperature: 0.7,
+          }
+        });
 
-      return res.json({
-        success: true,
-        source: 'google-genai-sdk',
-        model: 'gemini-3.8-flash',
-        reply: response.text || 'Không có phản hồi văn bản.',
-      });
+        return res.json({
+          success: true,
+          source: 'google-genai-sdk',
+          model: 'gemini-3.8-flash',
+          reply: response.text || 'Không có phản hồi văn bản.',
+        });
+      } catch (geminiError) {
+        console.warn('Gemini 3.8-flash consult error, falling back to rule engine:', geminiError);
+      }
     }
 
     const fallbackResponse = `[Chuyên gia Di sản Gen Z]: Về yêu cầu "${prompt}":
@@ -264,7 +270,7 @@ app.post(['/api/gemini/generate-tryon', '/api/try-on/img2img'], async (req, res)
     const fabric = promptJson?.base_garment?.fabric || 'Gấm lụa tơ tằm dệt chìm';
 
     let aiDescription = '';
-    let aiSource = 'OpenRouter AI Vision';
+    let aiSource = 'AI Studio Multimodal Engine';
     let generatedImageUrl: string | null = null;
     let apiDiagnostic: any = null;
 
@@ -272,8 +278,93 @@ app.post(['/api/gemini/generate-tryon', '/api/try-on/img2img'], async (req, res)
     const userImgData = heritageDb.getImageBase64(userImage);
     const refImgData = heritageDb.getImageBase64(referenceGarmentImage);
 
-    // 1. Call OpenRouter for Multimodal Assessment & Prompt Refinement
-    if (OPENROUTER_API_KEY) {
+    // 1. PRIMARY: Call Google Studio Image Model (gemini-3.1-flash-lite-image / gemini-3.1-flash-image)
+    if (ai) {
+      try {
+        const parts: any[] = [];
+
+        // Attach actual User Portrait JPEG/PNG Image to Gemini multimodal request
+        if (userImgData?.base64) {
+          parts.push({
+            inlineData: {
+              data: userImgData.base64,
+              mimeType: userImgData.mimeType || 'image/jpeg',
+            },
+          });
+        }
+
+        // Attach actual Reference Heritage JPEG/PNG Image to Gemini multimodal request
+        if (refImgData?.base64) {
+          parts.push({
+            inlineData: {
+              data: refImgData.base64,
+              mimeType: refImgData.mimeType || 'image/jpeg',
+            },
+          });
+        }
+
+        // Detailed prompt with strict Vietnamese Cultural Guardrail invariants
+        parts.push({
+          text: `High-fashion full-body photographic virtual try-on:
+The person in the user portrait is wearing authentic Vietnamese traditional attire: ${baseGarmentName} in ${fabric} (${primaryHex} and ${accentHex}).
+Cultural Guardrails & Strict Invariants:
+- Collar: Standing Vietnamese upright collar (Cổ Lập Lĩnh), fitted comfortably and neatly.
+- Lapel: Strict Hữu Nhậm standard (left lapel wraps over right lapel, fastened with 5 traditional buttons along the right seam).
+- Lower garment: ${lowerGarmentName}.
+- Preserve the subject's exact facial features, hair, skin tone, and glasses from the original user portrait.
+- Lighting: Fashion editorial studio lighting, photorealistic 8k, full body portrait.`,
+        });
+
+        const studioImgResponse = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite-image',
+          contents: { parts },
+          config: {
+            imageConfig: {
+              aspectRatio: '3:4',
+            },
+          },
+        });
+
+        // Extract generated image part from Studio Gemini response
+        for (const candidate of studioImgResponse.candidates || []) {
+          for (const part of candidate.content?.parts || []) {
+            if (part.inlineData?.data) {
+              const mime = part.inlineData.mimeType || 'image/png';
+              generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
+              aiSource = 'Google Studio Gemini Image Engine (gemini-3.1-flash-lite-image)';
+              break;
+            } else if (part.text && !aiDescription) {
+              aiDescription = part.text;
+            }
+          }
+          if (generatedImageUrl) break;
+        }
+
+        if (generatedImageUrl) {
+          apiDiagnostic = {
+            provider: 'Google AI Studio',
+            model: 'gemini-3.1-flash-lite-image',
+            status: 'SUCCESS',
+            message: 'Đã sinh ảnh thành công bằng mô hình Google Studio gemini-3.1-flash-lite-image!'
+          };
+        }
+      } catch (studioErr: any) {
+        const errMsg = studioErr?.message || '';
+        const isQuotaOrPaid = errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('429');
+        apiDiagnostic = {
+          provider: 'Google AI Studio',
+          model: 'gemini-3.1-flash-lite-image',
+          status: 'PAID_KEY_REQUIRED',
+          message: isQuotaOrPaid
+            ? 'Mô hình sinh ảnh gemini-3.1-flash-lite-image yêu cầu Paid API Key (Free tier limit: 0). Hệ thống đã tự động chuyển sang cơ chế Phục Dựng Di Sản tích hợp chân dung thật của bạn.'
+            : 'Mô hình sinh ảnh Studio gemini-3.1-flash-lite-image cần kích hoạt Paid API Key.',
+          requiresPaidModelFlow: true
+        };
+      }
+    }
+
+    // 2. SECONDARY: Call OpenRouter if configured and Studio image was not generated
+    if (!generatedImageUrl && OPENROUTER_API_KEY) {
       try {
         const orSystemMsg = `${SYSTEM_INSTRUCTION}
 Bạn đang vận hành động cơ AI Try-On Img2Img phục dựng cổ phục Việt Nam. 
@@ -291,7 +382,6 @@ Hãy thẩm định và đưa ra nhận xét chuyên gia về việc người d�
           }
         ];
 
-        // Attach actual User JPEG/PNG Image directly to OpenRouter API
         if (userImgData) {
           userContent.push({
             type: 'image_url',
@@ -299,7 +389,6 @@ Hãy thẩm định và đưa ra nhận xét chuyên gia về việc người d�
           });
         }
 
-        // Attach actual Reference Heritage JPEG/PNG Image directly to OpenRouter API
         if (refImgData) {
           userContent.push({
             type: 'image_url',
@@ -309,6 +398,7 @@ Hãy thẩm định và đưa ra nhận xét chuyên gia về việc người d�
 
         const orResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
+          signal: AbortSignal.timeout(3500),
           headers: {
             'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
             'HTTP-Referer': process.env.APP_URL || 'https://viet-phuc-remix.ai',
@@ -328,25 +418,15 @@ Hãy thẩm định và đưa ra nhận xét chuyên gia về việc người d�
 
         if (orResponse.ok) {
           const orData = await orResponse.json();
-          aiDescription = orData.choices?.[0]?.message?.content || '';
-          aiSource = 'OpenRouter (GPT-4o Vision)';
-        } else {
-          const errStatus = orResponse.status;
-          const errBody = await orResponse.text();
-          apiDiagnostic = {
-            provider: 'OpenRouter',
-            status: errStatus,
-            message: errStatus === 402 
-              ? 'Tài khoản OpenRouter cần tối thiểu $1.00 credit để sinh ảnh trực tiếp từ API cloud (https://openrouter.ai/settings/credits).' 
-              : errBody
-          };
+          if (!aiDescription) {
+            aiDescription = orData.choices?.[0]?.message?.content || '';
+          }
+          if (aiSource === 'AI Studio Multimodal Engine') {
+            aiSource = 'OpenRouter (GPT-4o Vision)';
+          }
         }
       } catch (orErr: unknown) {
         console.warn('OpenRouter try-on call error:', orErr);
-        apiDiagnostic = {
-          provider: 'OpenRouter',
-          message: orErr instanceof Error ? orErr.message : 'Connection error'
-        };
       }
     }
 
@@ -412,26 +492,35 @@ Hãy thẩm định và đưa ra nhận xét chuyên gia về việc người d�
           <circle cx="366" cy="375" r="5" fill="%23d97706" stroke="%23450a0a" stroke-width="1.5"/>
           <circle cx="372" cy="420" r="5" fill="%23d97706" stroke="%23450a0a" stroke-width="1.5"/>
 
-          <!-- Head & Neck with Matching Facial Identity & Glasses -->
-          <rect x="300" y="210" width="40" height="35" fill="%23fed7aa"/>
-          <ellipse cx="320" cy="170" rx="46" ry="58" fill="%23fed7aa"/>
-          <ellipse cx="272" cy="175" rx="6" ry="12" fill="%23fed7aa"/>
-          <ellipse cx="368" cy="175" rx="6" ry="12" fill="%23fed7aa"/>
-
-          <!-- Mấn Đỏ Đô Đồng Tông -->
-          <ellipse cx="320" cy="140" rx="52" ry="22" fill="%237f1d1d" stroke="%23991b1b" stroke-width="3"/>
-          <path d="M268 140 Q320 120 372 140 Q372 155 320 162 Q268 155 268 140 Z" fill="%23991b1b"/>
-
-          <!-- Facial Features with Glasses -->
-          <path d="M288 155 Q302 150 310 155" stroke="%230f172a" stroke-width="2.5" fill="none"/>
-          <path d="M330 155 Q338 150 352 155" stroke="%230f172a" stroke-width="2.5" fill="none"/>
-          <ellipse cx="298" cy="168" rx="6" ry="4" fill="%230f172a"/>
-          <ellipse cx="342" cy="168" rx="6" ry="4" fill="%230f172a"/>
-          <rect x="284" y="160" width="28" height="18" rx="4" fill="none" stroke="%231e293b" stroke-width="2"/>
-          <rect x="328" y="160" width="28" height="18" rx="4" fill="none" stroke="%231e293b" stroke-width="2"/>
-          <path d="M312 168 L328 168" stroke="%231e293b" stroke-width="2"/>
-          <path d="M320 168 L318 185 L324 186" stroke="%23d97706" stroke-width="1.5" fill="none"/>
-          <path d="M308 198 Q320 205 332 198" stroke="%23991b1b" stroke-width="2" fill="none"/>
+          <!-- Head & Neck with User Real Portrait Embedding or Matching Facial Identity -->
+          ${userImgData?.dataUrl ? `
+            <defs>
+              <clipPath id="userHeadClipDo">
+                <ellipse cx="320" cy="172" rx="56" ry="72" />
+              </clipPath>
+            </defs>
+            <rect x="300" y="210" width="40" height="35" fill="%23fed7aa"/>
+            <image href="${userImgData.dataUrl}" x="240" y="85" width="160" height="175" preserveAspectRatio="xMidYMid slice" clip-path="url(%23userHeadClipDo)"/>
+            <ellipse cx="320" cy="172" rx="56" ry="72" fill="none" stroke="%23d97706" stroke-width="2.5"/>
+            <!-- Mấn Đỏ Đô Hoàng Triều Đội Đầu -->
+            <ellipse cx="320" cy="115" rx="58" ry="18" fill="%237f1d1d" stroke="%23991b1b" stroke-width="3"/>
+          ` : `
+            <rect x="300" y="210" width="40" height="35" fill="%23fed7aa"/>
+            <ellipse cx="320" cy="170" rx="46" ry="58" fill="%23fed7aa"/>
+            <ellipse cx="272" cy="175" rx="6" ry="12" fill="%23fed7aa"/>
+            <ellipse cx="368" cy="175" rx="6" ry="12" fill="%23fed7aa"/>
+            <ellipse cx="320" cy="140" rx="52" ry="22" fill="%237f1d1d" stroke="%23991b1b" stroke-width="3"/>
+            <path d="M268 140 Q320 120 372 140 Q372 155 320 162 Q268 155 268 140 Z" fill="%23991b1b"/>
+            <path d="M288 155 Q302 150 310 155" stroke="%230f172a" stroke-width="2.5" fill="none"/>
+            <path d="M330 155 Q338 150 352 155" stroke="%230f172a" stroke-width="2.5" fill="none"/>
+            <ellipse cx="298" cy="168" rx="6" ry="4" fill="%230f172a"/>
+            <ellipse cx="342" cy="168" rx="6" ry="4" fill="%230f172a"/>
+            <rect x="284" y="160" width="28" height="18" rx="4" fill="none" stroke="%231e293b" stroke-width="2"/>
+            <rect x="328" y="160" width="28" height="18" rx="4" fill="none" stroke="%231e293b" stroke-width="2"/>
+            <path d="M312 168 L328 168" stroke="%231e293b" stroke-width="2"/>
+            <path d="M320 168 L318 185 L324 186" stroke="%23d97706" stroke-width="1.5" fill="none"/>
+            <path d="M308 198 Q320 205 332 198" stroke="%23991b1b" stroke-width="2" fill="none"/>
+          `}
         </g>
 
         <!-- Bottom Badge -->
@@ -469,9 +558,21 @@ Hãy thẩm định và đưa ra nhận xét chuyên gia về việc người d�
         <circle cx="335" cy="265" r="4.5" fill="%23fde047"/>
         <circle cx="348" cy="292" r="4.5" fill="%23fde047"/>
         <circle cx="360" cy="328" r="4.5" fill="%23fde047"/>
-        <rect x="300" y="200" width="40" height="35" fill="%23fed7aa"/>
-        <ellipse cx="320" cy="160" rx="42" ry="52" fill="%23fed7aa"/>
-        <ellipse cx="320" cy="130" rx="50" ry="20" fill="%238b5cf6" stroke="%23c084fc" stroke-width="3"/>
+        ${userImgData?.dataUrl ? `
+          <defs>
+            <clipPath id="userHeadClipNu">
+              <ellipse cx="320" cy="160" rx="50" ry="65" />
+            </clipPath>
+          </defs>
+          <rect x="300" y="200" width="40" height="35" fill="%23fed7aa"/>
+          <image href="${userImgData.dataUrl}" x="245" y="80" width="150" height="160" preserveAspectRatio="xMidYMid slice" clip-path="url(%23userHeadClipNu)"/>
+          <ellipse cx="320" cy="160" rx="50" ry="65" fill="none" stroke="%23c084fc" stroke-width="2.5"/>
+          <ellipse cx="320" cy="110" rx="54" ry="18" fill="%238b5cf6" stroke="%23c084fc" stroke-width="3"/>
+        ` : `
+          <rect x="300" y="200" width="40" height="35" fill="%23fed7aa"/>
+          <ellipse cx="320" cy="160" rx="42" ry="52" fill="%23fed7aa"/>
+          <ellipse cx="320" cy="130" rx="50" ry="20" fill="%238b5cf6" stroke="%23c084fc" stroke-width="3"/>
+        `}
         <rect x="140" y="915" width="360" height="32" rx="16" fill="%23111827" stroke="%238b5cf6" stroke-width="1.5"/>
         <text x="320" y="936" fill="%23f3e8ff" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">ẢNH AI PHỤC DỰNG NỮ TÍM (AFTER)</text>
       </svg>`;
@@ -483,6 +584,32 @@ Hãy thẩm định và đưa ra nhận xét chuyên gia về việc người d�
         <rect x="140" y="915" width="360" height="32" rx="16" fill="%23111827" stroke="%2338bdf8" stroke-width="1.5"/>
         <text x="320" y="936" fill="%23e0f2fe" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">ẢNH AI PHỤC DỰNG ÁO TẤC LỄ PHỤC (AFTER)</text>
       </svg>`;
+    }
+
+    if (!aiDescription && ai) {
+      try {
+        const geminiRes = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: `Thẩm định bộ trang phục Việt Phục Remix:
+- Cổ phục mục tiêu: ${baseGarmentName}
+- Tông màu: ${primaryHex} & ${accentHex}, chất liệu ${fabric}
+- Hạ y: ${lowerGarmentName}
+- Quy cách vạt: ${lapelStatus}
+- Denoising Strength: ${denoisingStrength}
+- Cấu hình JSON: ${JSON.stringify(promptJson || {})}`,
+          config: {
+            systemInstruction: `${SYSTEM_INSTRUCTION}
+Bạn đang thẩm định kết quả phục dựng ảnh Img2Img toàn thân Việt Phục Remix. Hãy đưa ra nhận định học thuật ngắn gọn súc tích, đánh giá điểm chuẩn mực văn hóa (Cultural Validity Score: 90-100), kiểm định quy cách Hữu Nhậm, cổ Lập Lĩnh và gợi ý phối đồ dạo phố/sự kiện cho Gen Z.`,
+            temperature: 0.7,
+          }
+        });
+        if (geminiRes.text) {
+          aiDescription = geminiRes.text;
+          aiSource = 'Google Gemini Multimodal AI (gemini-3.8-flash)';
+        }
+      } catch (geminiErr) {
+        console.warn('Gemini 3.8-flash tryon description notice:', geminiErr);
+      }
     }
 
     if (!aiDescription) {

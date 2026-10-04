@@ -18,10 +18,10 @@ export const TopNav: React.FC<TopNavProps> = ({
     <header className="sticky top-0 z-40 w-full bg-[#0b0f17]/95 backdrop-blur-md border-b border-slate-800/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         {/* Zone 1: Single text element wordmark */}
-        <a 
-          href="#" 
-          onClick={() => onSelectTab('game')}
-          className="flex items-center gap-2 text-base sm:text-lg font-black tracking-tight text-white group"
+        <button 
+          type="button"
+          onClick={() => onSelectTab('studio')}
+          className="flex items-center gap-2 text-base sm:text-lg font-black tracking-tight text-white group cursor-pointer text-left bg-transparent border-0 p-0"
         >
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center text-black font-mono font-bold shadow-lg shadow-amber-500/20 group-hover:scale-105 transition-transform">
             DK
@@ -32,7 +32,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           <span className="hidden sm:inline text-xs font-mono text-cyan-400 font-normal px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/50">
             Điện Kính Thiên & Việt Phục Remix
           </span>
-        </a>
+        </button>
 
         {/* Zone 2: 4 clean text navigation links */}
         <nav className="hidden md:flex items-center gap-2 text-xs font-semibold">

@@ -66,12 +66,12 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
   // Img2Img Hyperparameters
   const [denoisingStrength, setDenoisingStrength] = useState<number>(0.65);
   const [preserveFace, setPreserveFace] = useState<boolean>(true);
-  const [aiModelPreference, setAiModelPreference] = useState<string>('openai/gpt-4o');
+  const [aiModelPreference, setAiModelPreference] = useState<string>('gemini-3.1-flash-lite-image');
   
   // Try-on & JSON prompt states
   const [promptJson, setPromptJson] = useState<Record<string, unknown> | null>(null);
   const [aiDescription, setAiDescription] = useState<string>('');
-  const [aiSource, setAiSource] = useState<string>('OpenRouter GPT-4o & AI Generative Engine');
+  const [aiSource, setAiSource] = useState<string>('Google Studio Gemini Image Engine (gemini-3.1-flash-lite-image)');
   const [apiDiagnostic, setApiDiagnostic] = useState<any>(null);
   const [showJsonInspector, setShowJsonInspector] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
@@ -82,22 +82,40 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const customRefInputRef = useRef<HTMLInputElement>(null);
+  const isDbLoadedRef = useRef(false);
+  const initialFitDoneRef = useRef(false);
 
-  // 1. Fetch References and History from Database on Mount
+  // Helper to refresh history without touching references state
+  const refreshHistoryOnly = useCallback(async () => {
+    try {
+      const histRes = await fetch('/api/db/history');
+      if (histRes.ok) {
+        const histData = await histRes.json();
+        if (histData.data) {
+          setTryonHistory(histData.data);
+        }
+      }
+    } catch (e) {
+      console.warn('History load warning:', e);
+    }
+  }, []);
+
+  // 1. Fetch References and History from Database on Mount (Single Guarded Load)
   const loadDatabaseState = useCallback(async () => {
     try {
-      const refRes = await fetch('/api/db/references');
+      const [refRes, histRes] = await Promise.all([
+        fetch('/api/db/references'),
+        fetch('/api/db/history')
+      ]);
+
       if (refRes.ok) {
         const refData = await refRes.json();
         if (refData.data && refData.data.length > 0) {
           setDbReferences(refData.data);
-          if (!selectedReference) {
-            setSelectedReference(refData.data[0]);
-          }
+          setSelectedReference(prev => prev || refData.data[0]);
         }
       }
 
-      const histRes = await fetch('/api/db/history');
       if (histRes.ok) {
         const histData = await histRes.json();
         if (histData.data) {
@@ -107,11 +125,34 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
     } catch (e) {
       console.warn('DB load warning:', e);
     }
-  }, [selectedReference]);
+  }, []);
 
   useEffect(() => {
+    if (isDbLoadedRef.current) return;
+    isDbLoadedRef.current = true;
     loadDatabaseState();
   }, [loadDatabaseState]);
+
+  // Callback ref to attach video stream instantly when <video> DOM element mounts
+  const attachVideoRef = useCallback((videoElement: HTMLVideoElement | null) => {
+    videoRef.current = videoElement;
+    if (videoElement && streamRef.current) {
+      if (videoElement.srcObject !== streamRef.current) {
+        videoElement.srcObject = streamRef.current;
+      }
+      videoElement.play().catch(e => console.warn('Video play error on attach:', e));
+    }
+  }, []);
+
+  // Also sync video stream when isCameraActive changes
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && streamRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+      videoRef.current.play().catch(e => console.warn('Video play error on state sync:', e));
+    }
+  }, [isCameraActive]);
 
   // Build the structured JSON prompt representing current Studio configuration
   const generatePromptJson = useCallback(() => {
@@ -176,7 +217,7 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
     };
   }, [stopCamera]);
 
-  // Start webcam
+  // Start webcam with multi-tier resilient fallback constraints
   const startCamera = async () => {
     setCameraError(null);
     try {
@@ -184,15 +225,51 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Trình duyệt không hỗ trợ trực tiếp Webcam.');
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 800 }, facingMode: facingMode },
-        audio: false
-      });
+
+      let stream: MediaStream | null = null;
+      try {
+        // Tier 1: Ideal aspect ratio and dimensions
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { 
+            facingMode: { ideal: facingMode },
+            width: { ideal: 640 }, 
+            height: { ideal: 800 } 
+          },
+          audio: false
+        });
+      } catch (err1) {
+        console.warn('Tier 1 camera constraints failed, attempting fallback:', err1);
+        try {
+          // Tier 2: Flexible facing mode only
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode },
+            audio: false
+          });
+        } catch (err2) {
+          console.warn('Tier 2 camera constraints failed, attempting basic video:', err2);
+          // Tier 3: Any available video device
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+        }
+      }
+
+      if (!stream) {
+        throw new Error('Không thể khởi tạo luồng camera.');
+      }
+
       streamRef.current = stream;
       setIsCameraActive(true);
+
+      // If video ref is already mounted
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(e => console.warn('Video play error on start:', e));
+      }
     } catch (err: unknown) {
       console.warn('Camera access error:', err);
-      setCameraError('Không thể mở camera tự động. Vui lòng tải ảnh chân dung từ thiết bị!');
+      setCameraError('Không thể mở camera tự động. Vui lòng cấp quyền camera hoặc chọn ảnh từ thiết bị!');
       setIsCameraActive(false);
     }
   };
@@ -302,8 +379,8 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
         setGeneratedResultImage(data.generatedImageUrl);
       }
 
-      // Refresh DB history
-      loadDatabaseState();
+      // Refresh DB history without reloading references
+      refreshHistoryOnly();
     } catch (err) {
       console.warn('TryOn Execution error:', err);
     } finally {
@@ -311,13 +388,13 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
     }
   };
 
-  // Auto trigger initial fit if user image exists and no result yet
+  // Auto trigger initial fit only ONCE when references and user image become available
   useEffect(() => {
-    if (userImage && !generatedResultImage && dbReferences.length > 0) {
+    if (userImage && !generatedResultImage && dbReferences.length > 0 && !initialFitDoneRef.current) {
+      initialFitDoneRef.current = true;
       executeImg2ImgTryOn(userImage);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReference, dbReferences]);
+  }, [userImage, generatedResultImage, dbReferences]);
 
   // Copy prompt JSON
   const handleCopyJson = () => {
@@ -403,12 +480,68 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
         </div>
       </div>
 
-      {/* API Diagnostic Alert Notice (if OpenRouter credits notice) */}
+      {/* Model Selector & Engine Preferences */}
+      <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-cyan-400" />
+          <span className="font-bold text-slate-200">Động cơ AI Sinh Ảnh &amp; Thẩm định:</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setAiModelPreference('gemini-3.1-flash-lite-image')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+              aiModelPreference === 'gemini-3.1-flash-lite-image'
+                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-md shadow-cyan-500/20 font-bold'
+                : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Google Studio Gemini Flash Image (Khuyến nghị)</span>
+          </button>
+
+          <button
+            onClick={() => setAiModelPreference('gemini-3.1-flash-image')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+              aiModelPreference === 'gemini-3.1-flash-image'
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20 font-bold'
+                : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+            }`}
+          >
+            <Sparkle className="w-3.5 h-3.5" />
+            <span>Gemini Flash Pro (HD)</span>
+          </button>
+
+          <button
+            onClick={() => setAiModelPreference('openai/gpt-4o')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+              aiModelPreference === 'openai/gpt-4o'
+                ? 'bg-emerald-600 text-white shadow-md font-bold'
+                : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+            }`}
+          >
+            <span>OpenRouter GPT-4o</span>
+          </button>
+        </div>
+      </div>
+
+      {/* API Diagnostic Alert Notice */}
       {apiDiagnostic && (
-        <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-800/80 text-purple-200 text-xs flex items-start gap-2.5 animate-in fade-in">
-          <Info className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-bold text-purple-300">Thông báo từ động cơ OpenRouter AI:</span>
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-950/60 via-slate-900 to-purple-950/40 border border-purple-600/60 text-purple-200 text-xs flex items-start gap-3 animate-in fade-in">
+          <Sparkles className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+          <div className="space-y-1.5 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-purple-300">
+                Trạng thái động cơ AI ({apiDiagnostic.model || aiModelPreference}):
+              </span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                apiDiagnostic.status === 'SUCCESS' 
+                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-700' 
+                  : 'bg-amber-950 text-amber-300 border border-amber-700'
+              }`}>
+                {apiDiagnostic.status || 'STATUS'}
+              </span>
+            </div>
             <p className="text-slate-300 leading-relaxed">{apiDiagnostic.message}</p>
           </div>
         </div>
@@ -516,7 +649,7 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
             {/* FRAME 1 (LEFT): ẢNH GỐC CHÂN DUNG (BEFORE) */}
             <div className="rounded-3xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col justify-between shadow-xl relative aspect-[3/4] group">
-              <div className="absolute top-4 left-4 z-10 px-3 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 shadow-lg">
+              <div className="absolute top-3 left-3 z-10 px-2.5 py-1 rounded-full bg-black/80 backdrop-blur-md border border-slate-700 text-slate-200 text-[11px] font-bold flex items-center gap-1.5 shadow-lg">
                 <User className="w-3.5 h-3.5 text-slate-400" />
                 <span>ẢNH CHÂN DUNG GỐC (BEFORE)</span>
               </div>
@@ -524,7 +657,7 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
               {isCameraActive ? (
                 <div className="w-full h-full relative">
                   <video
-                    ref={videoRef}
+                    ref={attachVideoRef}
                     autoPlay
                     playsInline
                     muted
@@ -573,13 +706,15 @@ export const AnywearVirtualFitting: React.FC<AnywearVirtualFittingProps> = ({
 
             {/* FRAME 2 (RIGHT): ẢNH AI PHỤC DỰNG HOÀN CHỈNH (AFTER) */}
             <div className="rounded-3xl bg-slate-950 border border-purple-800/80 overflow-hidden flex flex-col justify-between shadow-2xl relative aspect-[3/4] group">
-              <div className="absolute top-4 left-4 z-10 px-3 py-1.5 rounded-full bg-purple-950/90 backdrop-blur-md border border-purple-500 text-purple-200 text-xs font-bold flex items-center gap-1.5 shadow-lg">
-                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <span>ẢNH AI PHỤC DỰNG TOÀN THÂN (AFTER)</span>
-              </div>
+              <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between gap-2 pointer-events-none">
+                <div className="px-2.5 py-1 rounded-full bg-purple-950/90 backdrop-blur-md border border-purple-500 text-purple-200 text-[11px] font-bold flex items-center gap-1.5 shadow-lg shrink-0">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <span>ẢNH PHỤC DỰNG (AFTER)</span>
+                </div>
 
-              <div className="absolute top-4 right-4 z-10 px-2.5 py-1 rounded-full bg-black/80 border border-slate-700 text-[10px] font-mono text-amber-400">
-                {activeRef?.name}
+                <div className="px-2.5 py-1 rounded-full bg-black/85 backdrop-blur-md border border-slate-700 text-[10px] font-mono text-amber-400 truncate max-w-[50%] text-right">
+                  {activeRef?.name}
+                </div>
               </div>
 
               {isGeneratingTryOn ? (

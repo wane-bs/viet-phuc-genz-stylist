@@ -53,7 +53,56 @@ const DEFAULT_CONFIG: StylingConfig = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'game' | 'studio' | 'vault' | 'agent' | 'knowledge'>('game');
+  const [activeTab, setActiveTabState] = useState<'game' | 'studio' | 'vault' | 'agent' | 'knowledge'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('viet_phuc_active_tab');
+        if (saved && ['game', 'studio', 'vault', 'agent', 'knowledge'].includes(saved)) {
+          return saved as 'game' | 'studio' | 'vault' | 'agent' | 'knowledge';
+        }
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+    return 'studio'; // Default to studio so user immediately accesses stylist & camera
+  });
+
+  const setActiveTab = (tab: 'game' | 'studio' | 'vault' | 'agent' | 'knowledge') => {
+    setActiveTabState(tab);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('viet_phuc_active_tab', tab);
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+  };
+
+  const [visualizerMode, setVisualizerModeState] = useState<'anywear_camera' | 'mannequin'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('viet_phuc_visualizer_mode');
+        if (saved === 'mannequin' || saved === 'anywear_camera') {
+          return saved;
+        }
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+    return 'anywear_camera'; // Always default to Anywear Camera
+  });
+
+  const setVisualizerMode = (mode: 'anywear_camera' | 'mannequin') => {
+    setVisualizerModeState(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('viet_phuc_visualizer_mode', mode);
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+  };
+
   const [config, setConfig] = useState<StylingConfig>(DEFAULT_CONFIG);
   const [isHeritageGuideOpen, setIsHeritageGuideOpen] = useState(false);
   const [isQuizOpen, setIsQuizOpen] = useState(false);
@@ -216,6 +265,8 @@ export default function App() {
                   config={config}
                   evaluation={outfitResult.evaluation}
                   outfitTitle={outfitResult.outfitTitle}
+                  viewMode={visualizerMode}
+                  onViewModeChange={setVisualizerMode}
                 />
 
                 <CulturalScoreGauge
