@@ -378,6 +378,68 @@ export const GarmentVisualizer: React.FC<GarmentVisualizerProps> = ({
                   <path d="M178 165 Q160 175 160 190 Q170 215 178 245" stroke="#F59E0B" strokeWidth="5" fill="none" strokeLinecap="round" />
                 </g>
               )}
+
+              {config.baseGarment === 'ao_giao_linh' && (
+                <g>
+                  {/* Giao Lĩnh - Cổ chéo giao nhau, vạt trái đè vạt phải */}
+                  <path
+                    d="M130 100 L190 100 L215 135 L228 290 L185 290 L160 292 L135 290 L92 290 L105 135 Z"
+                    fill="url(#primaryGrad)"
+                    stroke={accent}
+                    strokeWidth="1.5"
+                  />
+                  <path d="M130 100 L190 100 L215 135 L228 290 L185 290 L160 292 L135 290 L92 290 L105 135 Z" fill="url(#brocadePattern)" />
+                  {/* Sleeves */}
+                  <path d="M130 100 L85 140 L55 240 L90 240 L105 135 Z" fill={primary} stroke={accent} strokeWidth="1.2" />
+                  <path d="M190 100 L235 140 L265 240 L230 240 L215 135 Z" fill={primary} stroke={accent} strokeWidth="1.2" />
+                  
+                  {!isLeftLapelError ? (
+                    <g>
+                      {/* Vạt trái đè vạt phải (Hữu nhậm) */}
+                      <path d="M138 100 L195 160 L195 290" stroke="#FCD34D" strokeWidth="3" fill="none" />
+                      <path d="M182 100 L160 128" stroke="#FCD34D" strokeWidth="2.5" fill="none" />
+                      {/* Dải buộc dây bên sườn phải */}
+                      <path d="M195 160 Q210 170 205 195" stroke="#F59E0B" strokeWidth="3" fill="none" strokeLinecap="round" />
+                      <path d="M195 160 Q215 175 212 205" stroke="#F59E0B" strokeWidth="3" fill="none" strokeLinecap="round" />
+                    </g>
+                  ) : (
+                    <g className="animate-pulse">
+                      {/* Lỗi vạt phải đè vạt trái (Tả nhậm) */}
+                      <path d="M182 100 L125 160 L125 290" stroke="#EF4444" strokeWidth="3" strokeDasharray="4,2" fill="none" />
+                      <path d="M138 100 L160 128" stroke="#EF4444" strokeWidth="2.5" strokeDasharray="4,2" fill="none" />
+                    </g>
+                  )}
+                </g>
+              )}
+
+              {config.baseGarment === 'ao_dai_raglan' && (
+                <g>
+                  {/* Áo Dài Raglan - Cắt ráp raglan chéo tôn dáng, tà xẻ cao */}
+                  <path
+                    d="M138 98 L182 98 L198 128 L212 285 L180 285 L160 287 L140 285 L108 285 L122 128 Z"
+                    fill="url(#primaryGrad)"
+                    stroke={accent}
+                    strokeWidth="1.5"
+                  />
+                  {/* Raglan sleeves with diagonal seams from collar to armpit */}
+                  <path d="M138 98 L100 135 L75 220 L92 225 L122 128 Z" fill={primary} stroke={accent} strokeWidth="1" />
+                  <path d="M182 98 L220 135 L245 220 L228 225 L198 128 Z" fill={primary} stroke={accent} strokeWidth="1" />
+                  
+                  {/* Diagonal raglan seam lines */}
+                  <line x1="144" y1="98" x2="122" y2="128" stroke={accent} strokeWidth="1.5" strokeDasharray="2 2" />
+                  <line x1="176" y1="98" x2="198" y2="128" stroke={accent} strokeWidth="1.5" strokeDasharray="2 2" />
+                  
+                  {/* Collar & Snap buttons on right collarbone */}
+                  <rect x="148" y="92" width="24" height="12" rx="2" fill={primary} stroke={accent} strokeWidth="1.5" />
+                  <circle cx="165" cy="98" r="2.5" fill="#FCD34D" />
+                  <circle cx="174" cy="108" r="2.5" fill="#FCD34D" />
+                  <circle cx="182" cy="120" r="2.5" fill="#FCD34D" />
+                  
+                  {/* High side slit line */}
+                  <line x1="126" y1="200" x2="114" y2="285" stroke="rgba(255,255,255,0.2)" strokeWidth="1" />
+                  <line x1="194" y1="200" x2="206" y2="285" stroke="rgba(255,255,255,0.2)" strokeWidth="1" />
+                </g>
+              )}
             </g>
 
             {/* 5. ACCESSORIES OVERLAY */}

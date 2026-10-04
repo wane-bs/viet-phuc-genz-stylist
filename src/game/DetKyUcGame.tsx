@@ -10,8 +10,13 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Hand
+  Undo2,
+  Redo2,
+  History,
+  Layers
 } from 'lucide-react';
+import { GridBoardEngine } from '../modules/game/engine/GridBoardEngine';
+import { IGameCommand } from '../modules/game/engine/types';
 
 interface GameState {
   player: {
@@ -171,6 +176,13 @@ export const DetKyUcGame: React.FC = () => {
   const synthRef = useRef<HeritageSoundSynth>(new HeritageSoundSynth());
   const [soundEnabled, setSoundEnabled] = useState(true);
 
+  // Headless Grid Engine instance
+  const engineRef = useRef<GridBoardEngine>(new GridBoardEngine());
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+
   // Mutable Game State held in ref for steady 60FPS physics loop
   const stateRef = useRef<GameState>(createInitialState());
 
@@ -186,8 +198,21 @@ export const DetKyUcGame: React.FC = () => {
 
   const [isGateModalOpen, setIsGateModalOpen] = useState(false);
 
-  // Active Key inputs in Ref
+  // Sync with engine events
+  const updateEngineUI = useCallback(() => {
+    const engine = engineRef.current;
+    setCanUndo(engine.canUndo());
+    setCanRedo(engine.canRedo());
+    const history = engine.getUndoStack().map((cmd: IGameCommand) => cmd.description);
+    setCommandHistory(history.slice(-5));
+  }, []);
+
+  // Keyboard events listener
   const keysRef = useRef<{ [key: string]: boolean }>({});
+
+  useEffect(() => {
+    updateEngineUI();
+  }, [updateEngineUI]);
 
   // Keyboard events listener
   useEffect(() => {
@@ -224,6 +249,8 @@ export const DetKyUcGame: React.FC = () => {
   // Reset Game
   const handleResetGame = () => {
     stateRef.current = createInitialState();
+    engineRef.current.reset();
+    updateEngineUI();
     setUiState({
       buttonCount: 0,
       hasFan: false,
@@ -233,6 +260,53 @@ export const DetKyUcGame: React.FC = () => {
       spookyMessage: '',
     });
     setIsGateModalOpen(false);
+  };
+
+  // Undo & Redo Handlers using Headless GridBoardEngine
+  const handleUndo = () => {
+    const engine = engineRef.current;
+    const reverted = engine.undo();
+    if (reverted) {
+      synthRef.current.playCollect();
+      stateRef.current.player.hasFan = reverted.player.hasFan;
+      stateRef.current.player.hasClearedWeb = reverted.player.hasClearedWeb;
+      stateRef.current.player.isTransformed = reverted.player.isTransformed;
+      stateRef.current.collectedButtons = { ...reverted.collectedButtons };
+      stateRef.current.lapelInstalledSide = reverted.lapelInstalledSide;
+
+      const count = Object.values(reverted.collectedButtons).filter(Boolean).length;
+      setUiState((prev) => ({
+        ...prev,
+        buttonCount: count,
+        hasFan: reverted.player.hasFan,
+        isTransformed: reverted.player.isTransformed,
+        gameMessage: reverted.statusMessage || 'Đã hoàn tác (Undo).'
+      }));
+      updateEngineUI();
+    }
+  };
+
+  const handleRedo = () => {
+    const engine = engineRef.current;
+    const reapplied = engine.redo();
+    if (reapplied) {
+      synthRef.current.playCollect();
+      stateRef.current.player.hasFan = reapplied.player.hasFan;
+      stateRef.current.player.hasClearedWeb = reapplied.player.hasClearedWeb;
+      stateRef.current.player.isTransformed = reapplied.player.isTransformed;
+      stateRef.current.collectedButtons = { ...reapplied.collectedButtons };
+      stateRef.current.lapelInstalledSide = reapplied.lapelInstalledSide;
+
+      const count = Object.values(reapplied.collectedButtons).filter(Boolean).length;
+      setUiState((prev) => ({
+        ...prev,
+        buttonCount: count,
+        hasFan: reapplied.player.hasFan,
+        isTransformed: reapplied.player.isTransformed,
+        gameMessage: reapplied.statusMessage || 'Đã làm lại (Redo).'
+      }));
+      updateEngineUI();
+    }
   };
 
   // Main 60FPS Loop using requestAnimationFrame
@@ -328,6 +402,8 @@ export const DetKyUcGame: React.FC = () => {
       // 4. FAN PICKUP
       if (!p.hasFan && Math.abs(p.x - fanItem.x) < 35 && Math.abs(p.y - fanItem.y) < 35) {
         p.hasFan = true;
+        engineRef.current.collectFan();
+        updateEngineUI();
         synthRef.current.playCollect();
         setUiState((prev) => ({
           ...prev,
@@ -340,6 +416,8 @@ export const DetKyUcGame: React.FC = () => {
       if (!p.hasClearedWeb && p.x + p.width > webObstacle.x && p.x < webObstacle.x + webObstacle.w) {
         if (p.hasFan) {
           p.hasClearedWeb = true;
+          engineRef.current.clearWeb();
+          updateEngineUI();
           synthRef.current.playCollect();
           setUiState((prev) => ({
             ...prev,
@@ -360,6 +438,8 @@ export const DetKyUcGame: React.FC = () => {
         if (!state.collectedButtons[btnKey]) {
           if (Math.abs(p.x - btn.x) < 30 && Math.abs(p.y - btn.y) < 30) {
             state.collectedButtons[btnKey] = true;
+            engineRef.current.collectButton(btnKey, btn.name);
+            updateEngineUI();
             const count = Object.values(state.collectedButtons).filter(Boolean).length;
             synthRef.current.playCollect();
             setUiState((prev) => ({
@@ -389,6 +469,8 @@ export const DetKyUcGame: React.FC = () => {
       if (state.lapelInstalledSide === 'right' && Math.abs(p.x - loomPos.x) < 50 && !p.isTransformed) {
         p.isTransformed = true;
         state.stage = 'warm_awakening';
+        engineRef.current.awakenHeritage();
+        updateEngineUI();
         synthRef.current.playAwakeningFanfare();
         setUiState((prev) => ({
           ...prev,
@@ -617,6 +699,9 @@ export const DetKyUcGame: React.FC = () => {
 
   // Gate Lapel Puzzle Action
   const handleSolveGate = (side: 'right' | 'left') => {
+    engineRef.current.solveGate(side);
+    updateEngineUI();
+
     if (side === 'left') {
       synthRef.current.playSpookyGlitch();
       setUiState((prev) => ({
@@ -644,10 +729,10 @@ export const DetKyUcGame: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono text-amber-400 font-bold uppercase tracking-wider">
-              2D NARRATIVE PUZZLE-PLATFORMER (CANVAS 60FPS)
+              2D HEADLESS GAME CORE (COMMAND PATTERN · UNDO/REDO)
             </span>
             <span className="text-slate-600">·</span>
-            <span className="text-xs text-cyan-400 font-mono">VERTICAL SLICE DEMO</span>
+            <span className="text-xs text-cyan-400 font-mono">60FPS CANVAS</span>
           </div>
           <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
             Dệt Ký Ức: Khuy Ngọc Trên Điện Kính Thiên
@@ -655,6 +740,41 @@ export const DetKyUcGame: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Undo / Redo controls */}
+          <div className="flex items-center bg-slate-900 border border-slate-700/80 rounded-xl p-1 gap-1">
+            <button
+              onClick={handleUndo}
+              disabled={!canUndo}
+              className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
+                canUndo ? 'text-cyan-300 hover:bg-slate-800 cursor-pointer' : 'text-slate-600 cursor-not-allowed'
+              }`}
+              title="Hoàn tác bước đi (Undo)"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Undo</span>
+            </button>
+
+            <button
+              onClick={handleRedo}
+              disabled={!canRedo}
+              className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
+                canRedo ? 'text-amber-300 hover:bg-slate-800 cursor-pointer' : 'text-slate-600 cursor-not-allowed'
+              }`}
+              title="Làm lại bước đi (Redo)"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Redo</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowHistoryDrawer(!showHistoryDrawer)}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700"
+            title="Lịch sử lệnh (Command Stack)"
+          >
+            <History className="w-4 h-4 text-purple-400" />
+          </button>
+
           <button
             onClick={() => {
               const newMute = !soundEnabled;
@@ -676,6 +796,30 @@ export const DetKyUcGame: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Command Stack Drawer */}
+      {showHistoryDrawer && (
+        <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-1.5 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between pb-1 border-b border-slate-800 text-slate-400">
+            <span className="font-mono text-cyan-400 font-semibold flex items-center gap-1">
+              <Layers className="w-3.5 h-3.5" />
+              Headless Engine Command Stack ({commandHistory.length} lệnh gần nhất):
+            </span>
+            <span className="text-[10px] text-slate-500">Command Pattern State Machine</span>
+          </div>
+          {commandHistory.length === 0 ? (
+            <div className="text-slate-500 py-1">Chưa có hành động nào trong stack. Hãy di chuyển hoặc thu thập cổ vật!</div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {commandHistory.map((cmd, idx) => (
+                <span key={idx} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 text-[11px] font-mono">
+                  {idx + 1}. {cmd}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Canvas Viewport */}
       <div className="relative w-full aspect-[16/9] max-h-[460px] bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-inner">
@@ -774,7 +918,29 @@ export const DetKyUcGame: React.FC = () => {
         </div>
 
         {/* Right Action buttons */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleUndo}
+            disabled={!canUndo}
+            className={`w-12 h-12 rounded-xl flex items-center justify-center border font-bold shadow-md transition-colors ${
+              canUndo ? 'bg-slate-800 border-cyan-800/80 text-cyan-300 active:bg-cyan-500 active:text-black cursor-pointer' : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+            }`}
+            title="Undo"
+          >
+            <Undo2 className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={handleRedo}
+            disabled={!canRedo}
+            className={`w-12 h-12 rounded-xl flex items-center justify-center border font-bold shadow-md transition-colors ${
+              canRedo ? 'bg-slate-800 border-amber-800/80 text-amber-300 active:bg-amber-500 active:text-black cursor-pointer' : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+            }`}
+            title="Redo"
+          >
+            <Redo2 className="w-5 h-5" />
+          </button>
+
           <button
             onMouseDown={() => pressVirtualKey('V_JUMP')}
             onMouseUp={() => releaseVirtualKey('V_JUMP')}

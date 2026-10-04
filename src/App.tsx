@@ -146,7 +146,7 @@ export default function App() {
               }`}
             >
               <Cpu className="w-4 h-4" />
-              <span>4. AI Agent &amp; Google SDKs</span>
+              <span>4. AI Agent &amp; Kiến Trúc RAG</span>
             </button>
 
             <button
