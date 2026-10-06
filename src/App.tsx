@@ -1,331 +1,153 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useMemo } from 'react';
-import { 
-  StylingConfig, 
-  PresetLookbook 
-} from './types';
-import { generateOutfitRemixResult } from './services/culturalGuardrailEngine';
-import { TopNav } from './components/TopNav';
+import React, { useState } from 'react';
 import { DetKyUcGame } from './game/DetKyUcGame';
-import { StylistControlPanel } from './components/StylistControlPanel';
-import { GarmentVisualizer } from './components/GarmentVisualizer';
-import { CulturalScoreGauge } from './components/CulturalScoreGauge';
-import { ShowcaseCard } from './components/ShowcaseCard';
-import { PresetLookbookGallery } from './components/PresetLookbookGallery';
-import { AgentSkillsStudio } from './components/AgentSkillsStudio';
-import { KnowledgeBaseExplorer } from './components/KnowledgeBaseExplorer';
-import { CulturalHeritageGuideModal } from './components/CulturalHeritageGuideModal';
-import { HeritageQuizModal } from './components/HeritageQuizModal';
-import { HeritageReferenceVault } from './components/HeritageReferenceVault';
-import { HeritageModelReference } from './data/heritageImageModels';
-import { Footer } from './components/Footer';
-import { 
-  Gamepad2, 
-  Sparkles, 
-  BookOpen, 
-  Layers, 
-  ShieldCheck, 
-  Trophy, 
-  Compass, 
-  Flame, 
-  ArrowRight, 
-  Scroll,
-  Cpu
-} from 'lucide-react';
+import { WardrobeStudio } from './components/WardrobeStudio';
+import { HeritageHandbookModal } from './components/HeritageHandbookModal';
+import { Sparkles, BookOpen, Play, ArrowRight, RotateCcw } from 'lucide-react';
 
-const DEFAULT_CONFIG: StylingConfig = {
-  gender: 'unisex',
-  eventContext: 'concert_festival',
-  aestheticVibe: 'streetwear',
-  baseGarment: 'ngu_than_tay_chen',
-  lapelDirection: 'right', // Hợp lễ chuẩn mực
-  lowerGarment: 'cargo_pants',
-  footwear: 'chunky_sneaker',
-  accessories: ['slim_sunglasses', 'silver_kieng'],
-  pattern: 'van_may_thuy_ba',
-  fabric: 'gam_to_tam',
-  primaryColor: '#1E293B',
-  accentColor: '#06B6D4'
-};
+type AppScene = 'OPENING' | 'GAME' | 'AWAKENING' | 'WARDROBE';
 
 export default function App() {
-  const [activeTab, setActiveTabState] = useState<'game' | 'studio' | 'vault' | 'agent' | 'knowledge'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('viet_phuc_active_tab');
-        if (saved && ['game', 'studio', 'vault', 'agent', 'knowledge'].includes(saved)) {
-          return saved as 'game' | 'studio' | 'vault' | 'agent' | 'knowledge';
-        }
-      } catch (e) {
-        console.warn('LocalStorage error:', e);
-      }
-    }
-    return 'studio'; // Default to studio so user immediately accesses stylist & camera
-  });
-
-  const setActiveTab = (tab: 'game' | 'studio' | 'vault' | 'agent' | 'knowledge') => {
-    setActiveTabState(tab);
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('viet_phuc_active_tab', tab);
-      } catch (e) {
-        console.warn('LocalStorage error:', e);
-      }
-    }
-  };
-
-  const [visualizerMode, setVisualizerModeState] = useState<'anywear_camera' | 'mannequin'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('viet_phuc_visualizer_mode');
-        if (saved === 'mannequin' || saved === 'anywear_camera') {
-          return saved;
-        }
-      } catch (e) {
-        console.warn('LocalStorage error:', e);
-      }
-    }
-    return 'anywear_camera'; // Always default to Anywear Camera
-  });
-
-  const setVisualizerMode = (mode: 'anywear_camera' | 'mannequin') => {
-    setVisualizerModeState(mode);
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('viet_phuc_visualizer_mode', mode);
-      } catch (e) {
-        console.warn('LocalStorage error:', e);
-      }
-    }
-  };
-
-  const [config, setConfig] = useState<StylingConfig>(DEFAULT_CONFIG);
-  const [isHeritageGuideOpen, setIsHeritageGuideOpen] = useState(false);
-  const [isQuizOpen, setIsQuizOpen] = useState(false);
-
-  // Generate real-time live evaluation and remix details
-  const outfitResult = useMemo(() => {
-    return generateOutfitRemixResult(config);
-  }, [config]);
-
-  const handleSelectPreset = (preset: PresetLookbook) => {
-    setConfig(preset.config);
-    setActiveTab('studio');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleSelectVaultReference = (ref: HeritageModelReference) => {
-    setConfig(prev => ({
-      ...prev,
-      baseGarment: ref.category === 'ngu_than_tay_chen' ? 'ngu_than_tay_chen' 
-        : ref.category === 'ao_tac' ? 'ao_tac' 
-        : ref.category === 'ao_nhat_binh' ? 'ao_nhat_binh' : 'ngu_than_tay_chen',
-      primaryColor: ref.colorPalette.primary,
-      accentColor: ref.colorPalette.accent,
-      lapelDirection: 'right'
-    }));
-    setActiveTab('studio');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleReset = () => {
-    setConfig(DEFAULT_CONFIG);
-  };
+  const [scene, setScene] = useState<AppScene>('OPENING');
+  const [isHandbookOpen, setIsHandbookOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#0b0f17] text-slate-100 flex flex-col selection:bg-amber-500 selection:text-black font-sans">
-      {/* Top Bar (3-Zone Contract) */}
-      <TopNav
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onOpenHeritageGuide={() => setIsHeritageGuideOpen(true)}
-        onOpenQuiz={() => setIsQuizOpen(true)}
-      />
+    <div className="w-screen h-screen overflow-hidden bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-black">
+      
+      {/* SCENE 1: OPENING PROLOGUE (One-Screen Viewport) */}
+      {scene === 'OPENING' && (
+        <div className="relative w-full h-full flex flex-col items-center justify-between p-6 sm:p-10 bg-gradient-to-b from-[#0c1322] via-[#090d16] to-[#040711] overflow-hidden select-none">
+          {/* Subtle mist effect & imperial halo */}
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute bottom-10 right-10 w-80 h-80 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 space-y-8">
-        {/* Navigation Mode Segmented Bar */}
-        <div className="flex items-center justify-between p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl backdrop-blur-md">
-          <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-            <button
-              onClick={() => setActiveTab('game')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                activeTab === 'game'
-                  ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Gamepad2 className="w-4 h-4" />
-              <span>1. Trò Chơi 2D: Dệt Ký Ức</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('studio')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                activeTab === 'studio'
-                  ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>2. Stylist Studio &amp; AI Try-On</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('vault')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                activeTab === 'vault'
-                  ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Layers className="w-4 h-4" />
-              <span>3. Kho Reference Img2Img</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('agent')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                activeTab === 'agent'
-                  ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Cpu className="w-4 h-4" />
-              <span>4. AI Agent &amp; Kiến Trúc RAG</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('knowledge')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                activeTab === 'knowledge'
-                  ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>5. Knowledge Base Di Sản</span>
-            </button>
-          </div>
-
-          <div className="hidden lg:flex items-center gap-2 text-xs text-slate-400 font-mono pr-2">
-            <span>SDK: @google/genai</span>
-          </div>
-        </div>
-
-        {/* 1. TAB: PLAYABLE GAME (DỆT KÝ ỨC) */}
-        {activeTab === 'game' && (
-          <div className="space-y-6 animate-in fade-in duration-300">
-            {/* Game Canvas & Controls */}
-            <DetKyUcGame />
-
-            {/* Quick transition banner */}
-            <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-[#131b2e] to-slate-900 border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="space-y-1 text-center sm:text-left">
-                <h3 className="text-base font-bold text-white">
-                  Đã mở khóa Áo Ngũ Thân trong game? Hãy sáng tạo phong cách cho riêng bạn!
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Thử nghiệm phối Áo Ngũ Thân, Áo Tấc, Nhật Bình cùng Sneaker, Cargo pants và kiểm định Ranh Giới Văn Hóa.
-                </p>
+          {/* Top Brand Header */}
+          <div className="w-full max-w-4xl flex items-center justify-between z-10 text-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center font-bold text-black text-xs font-mono shadow-lg shadow-amber-500/20">
+                DK
               </div>
+              <span className="font-['Cinzel',serif] tracking-widest font-black text-amber-300 text-sm sm:text-base">
+                DỆT KÝ ỨC
+              </span>
+            </div>
 
+            <button
+              onClick={() => setIsHandbookOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+              <span>Sổ Tay Di Sản</span>
+            </button>
+          </div>
+
+          {/* Center Story Callout */}
+          <div className="max-w-xl text-center space-y-4 z-10 my-auto animate-in fade-in zoom-in-95 duration-500">
+            <div className="w-16 h-16 rounded-3xl bg-slate-900 border border-cyan-500/30 mx-auto flex items-center justify-center text-cyan-300 shadow-xl shadow-cyan-500/10">
+              <Sparkles className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-xs font-mono tracking-widest text-cyan-400 font-bold uppercase">
+                HỒI I · TIỀN ĐIỆN CUNG ĐÌNH NGUYỄN
+              </span>
+              <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight">
+                Khuy Ngọc Ngũ Thường
+              </h1>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-lg mx-auto">
+              Tháng năm phai mờ, ký ức tiền nhân chìm trong sương lam giá lạnh của chốn hoàng thành. Tinh linh An thức dậy với tấm áo tơ xám đơn sơ, bắt đầu hành trình tìm lại 5 hạt khuy đức hạnh và nếp áo ngũ thân rạng ngời.
+            </p>
+
+            {/* Exactly One Primary CTA Button */}
+            <div className="pt-2">
               <button
-                onClick={() => setActiveTab('studio')}
-                className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-lg shadow-cyan-500/20 transition-all flex items-center gap-2 shrink-0"
+                onClick={() => setScene('GAME')}
+                className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black font-black text-sm tracking-wide shadow-xl shadow-amber-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center gap-2.5 mx-auto"
               >
-                <span>Mở Studio Stylist Ngay</span>
-                <ArrowRight className="w-4 h-4" />
+                <Play className="w-4 h-4 fill-black" />
+                <span>Bắt Đầu Dệt Ký Ức</span>
               </button>
             </div>
           </div>
-        )}
 
-        {/* 2. TAB: STYLIST STUDIO */}
-        {activeTab === 'studio' && (
-          <div className="space-y-8 animate-in fade-in duration-300">
-            {/* Main Studio Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              {/* Left 6 Columns: Stylist Control Panel */}
-              <div className="lg:col-span-6 space-y-6">
-                <StylistControlPanel
-                  config={config}
-                  onChange={setConfig}
-                  onApplyPreset={handleSelectPreset}
-                  onReset={handleReset}
-                />
-              </div>
+          {/* Bottom Footnote Guide */}
+          <div className="w-full max-w-xl text-center z-10 text-[11px] text-slate-500">
+            Khám phá quy chuẩn Áo Ngũ Thân định chế năm 1744 & Triết lý Nhân - Lễ - Nghĩa - Trí - Tín
+          </div>
+        </div>
+      )}
 
-              {/* Right 6 Columns: Interactive SVG Mannequin & Cultural Score Gauge */}
-              <div className="lg:col-span-6 space-y-6 sticky top-20">
-                <GarmentVisualizer
-                  config={config}
-                  evaluation={outfitResult.evaluation}
-                  outfitTitle={outfitResult.outfitTitle}
-                  viewMode={visualizerMode}
-                  onViewModeChange={setVisualizerMode}
-                />
+      {/* SCENE 2: 2D GAME VIEWPORT (Main Narrative Puzzle Platformer) */}
+      {scene === 'GAME' && (
+        <div className="w-full h-full flex flex-col overflow-hidden">
+          <DetKyUcGame
+            onCompleteGame={() => setScene('AWAKENING')}
+            onOpenHandbook={() => setIsHandbookOpen(true)}
+          />
+        </div>
+      )}
 
-                <CulturalScoreGauge
-                  evaluation={outfitResult.evaluation}
-                />
-              </div>
+      {/* SCENE 3: AWAKENING CELEBRATION CUTSCENE */}
+      {scene === 'AWAKENING' && (
+        <div className="relative w-full h-full flex flex-col items-center justify-center p-6 sm:p-10 bg-gradient-to-b from-[#2a1304] via-[#1a0a01] to-[#0c0500] overflow-hidden select-none animate-in fade-in duration-500">
+          <div className="absolute inset-0 bg-amber-500/10 blur-3xl pointer-events-none" />
+
+          <div className="max-w-md w-full text-center space-y-5 z-10 p-8 rounded-3xl bg-slate-950/80 border border-amber-500/40 shadow-2xl backdrop-blur-md">
+            <div className="w-16 h-16 rounded-3xl bg-amber-500/20 border border-amber-400/40 mx-auto flex items-center justify-center text-amber-300 shadow-xl shadow-amber-500/20 animate-bounce">
+              <Sparkles className="w-8 h-8" />
             </div>
 
-            {/* Showcase Card: 3-Layer Breakdown & Historical Insight */}
-            <ShowcaseCard
-              outfit={outfitResult}
-              onOpenHeritageGuide={() => setIsHeritageGuideOpen(true)}
-            />
+            <div>
+              <span className="text-xs font-mono tracking-widest text-amber-400 font-bold uppercase">
+                THỨC TỈNH DI SẢN
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-white mt-1">
+                Áo Ngũ Thân Đã Sống Lại
+              </h2>
+            </div>
 
-            {/* Preset Lookbook Gallery */}
-            <PresetLookbookGallery
-              onSelectPreset={handleSelectPreset}
-              currentConfig={config}
-            />
+            <p className="text-xs text-amber-200/90 leading-relaxed">
+              Sương lam đã tan, năm hạt khuy ngọc <b>Nhân – Lễ – Nghĩa – Trí – Tín</b> cài sang vạt phải sáng ngời trên nền gấm vàng cung đình. Hãy bước vào Tủ Đồ Hoàng Cung để mở khóa và phối đồ đương đại!
+            </p>
+
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={() => setScene('WARDROBE')}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black font-black text-xs shadow-lg shadow-amber-500/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>Mở Tủ Đồ Hoàng Cung</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => setIsHandbookOpen(true)}
+                className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium border border-slate-800 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                <span>Xem Trang Sổ Tay Di Sản Vừa Mở</span>
+              </button>
+            </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* 3. TAB: HERITAGE REFERENCE VAULT FOR IMG2IMG */}
-        {activeTab === 'vault' && (
-          <div className="animate-in fade-in duration-300">
-            <HeritageReferenceVault
-              onSelectReferenceForTryOn={handleSelectVaultReference}
-            />
-          </div>
-        )}
+      {/* SCENE 4: STREAMLINED WARDROBE REMIX STUDIO */}
+      {scene === 'WARDROBE' && (
+        <div className="w-full h-full flex flex-col overflow-hidden">
+          <WardrobeStudio
+            onReplayGame={() => setScene('GAME')}
+            onOpenHandbook={() => setIsHandbookOpen(true)}
+          />
+        </div>
+      )}
 
-        {/* 4. TAB: AGENT SKILLS STUDIO & LIVE GEMINI AI */}
-        {activeTab === 'agent' && (
-          <div className="animate-in fade-in duration-300">
-            <AgentSkillsStudio currentConfig={config} />
-          </div>
-        )}
-
-        {/* 4. TAB: KNOWLEDGE BASE EXPLORER */}
-        {activeTab === 'knowledge' && (
-          <div className="animate-in fade-in duration-300">
-            <KnowledgeBaseExplorer />
-          </div>
-        )}
-      </main>
-
-      {/* FOOTER */}
-      <Footer />
-
-      {/* EDUCATIONAL MODALS */}
-      <CulturalHeritageGuideModal
-        isOpen={isHeritageGuideOpen}
-        onClose={() => setIsHeritageGuideOpen(false)}
+      {/* SỔ TAY DI SẢN (Flipbook Modal - Accessible from any scene) */}
+      <HeritageHandbookModal
+        isOpen={isHandbookOpen}
+        onClose={() => setIsHandbookOpen(false)}
       />
 
-      <HeritageQuizModal
-        isOpen={isQuizOpen}
-        onClose={() => setIsQuizOpen(false)}
-      />
     </div>
   );
 }
