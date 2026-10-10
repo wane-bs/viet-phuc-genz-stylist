@@ -44,6 +44,7 @@ interface GameState {
   };
   lapelInstalledSide: 'none' | 'left' | 'right';
   gateUnlocked: boolean;
+  gatePuzzleTriggered: boolean;
   colorSweepRadius: number;
   cameraX: number;
 }
@@ -116,6 +117,7 @@ function createInitialState(): GameState {
     },
     lapelInstalledSide: 'none',
     gateUnlocked: false,
+    gatePuzzleTriggered: false,
     colorSweepRadius: 0,
     cameraX: 0,
   };
@@ -256,7 +258,7 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
   // Reactive UI state
   const [buttonCount, setButtonCount] = useState(0);
   const [activeButtonPopup, setActiveButtonPopup] = useState<typeof JADE_BUTTONS_DATA['nhan'] | null>(null);
-  const [isSpookyDistorion, setIsSpookyDistortion] = useState(false);
+  const [isSpookyDistortion, setIsSpookyDistortion] = useState(false);
   const [isGatePuzzleOpen, setIsGatePuzzleOpen] = useState(false);
   const [isGateQuizOpen, setIsGateQuizOpen] = useState(false);
   const [quizSelectedOption, setQuizSelectedOption] = useState<number | null>(null);
@@ -462,15 +464,25 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
         }
       });
 
-      // 7. TEN: PALACE GATE REACHED
-      if (Math.abs(p.x - gatePos.x) < 40 && !state.gateUnlocked) {
-        const collectedAll = Object.values(state.collectedButtons).filter(Boolean).length === 5;
-        if (collectedAll) {
-          setIsGatePuzzleOpen(true);
-        } else {
-          if (p.x > gatePos.x) p.x = gatePos.x - p.width;
-          const count = Object.values(state.collectedButtons).filter(Boolean).length;
-          setGameToast(`Cổng Hoàng Thành khóa then: Hãy thu thập đủ 5 Khuy Ngũ Thường (${count}/5).`);
+      // 7. PALACE GATE: SOLID COLLISION & IDEMPOTENT PUZZLE TRIGGER
+      if (!state.gateUnlocked) {
+        // A. Solid collision body: Chặn cứng nhân vật không cho đi xuyên qua cổng khi đang khóa
+        if (p.x + p.width > gatePos.x && p.x < gatePos.x + gatePos.w) {
+          p.x = gatePos.x - p.width;
+        }
+
+        // B. Trigger câu đố có kiểm soát Idempotency (Tránh spam setState mỗi frame)
+        if (Math.abs(p.x - gatePos.x) < 55) {
+          const collectedAll = Object.values(state.collectedButtons).filter(Boolean).length === 5;
+          if (collectedAll) {
+            if (!state.gatePuzzleTriggered) {
+              state.gatePuzzleTriggered = true;
+              setIsGatePuzzleOpen(true);
+            }
+          } else {
+            const count = Object.values(state.collectedButtons).filter(Boolean).length;
+            setGameToast(`Cổng Hoàng Thành khóa then: Hãy thu thập đủ 5 Khuy Ngũ Thường (${count}/5).`);
+          }
         }
       }
 
@@ -701,22 +713,26 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
   };
 
   // Handle Gate Cultural Quiz Answer
-  const handleQuizAnswer = (optionIndex: number) => {
+  const handleGateQuizAnswer = (optionIndex: number) => {
     setQuizSelectedOption(optionIndex);
     // Correct option is 1: "Vạt trái đè vạt phải (cài sang sườn phải)"
     if (optionIndex === 1) {
       setQuizError(false);
+      stateRef.current.gateUnlocked = true;
       synthRef.current.playBronzeChime();
       setTimeout(() => {
-        stateRef.current.gateUnlocked = true;
         setIsGateQuizOpen(false);
+        setIsGatePuzzleOpen(false);
+        setIsSpookyDistortion(false);
         setGameToast('CỔNG HOÀNG THÀNH MỞ RỰC RỠ: Tiến vào chạm Khung Cửi Cung Đình để thức tỉnh!');
-      }, 700);
+      }, 400);
     } else {
       setQuizError(true);
       synthRef.current.playSpookyGlitch();
     }
   };
+
+  const handleQuizAnswer = handleGateQuizAnswer;
 
   return (
     <div className="relative w-full h-full flex flex-col justify-between select-none">
@@ -796,7 +812,7 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
         />
 
         {/* Spooky Horror Glitch Overlay when left lapel chosen */}
-        {isSpookyDistorion && (
+        {isSpookyDistortion && (
           <div className="absolute inset-0 bg-red-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30 animate-pulse">
             <ShieldAlert className="w-14 h-14 text-red-500 mb-3" />
             <h3 className="text-lg font-black text-white font-mono uppercase tracking-wider mb-2">
@@ -806,6 +822,8 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
               "Vạt trái là nẹp tang ma tử phục, điềm xấu cõi âm!" Cổ luật Á Đông quy định: Người sống cài vạt sang phải (Hữu nhậm), chỉ khi khâm liệm người khuất mới cài vạt sang trái (Tả nhậm).
             </p>
             <button
+              id="btn-switch-right-lapel"
+              data-testid="btn-switch-right-lapel"
               onClick={() => {
                 setIsSpookyDistortion(false);
                 setIsGatePuzzleOpen(true);
@@ -874,6 +892,8 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
 
             <div className="grid grid-cols-2 gap-3 pt-2">
               <button
+                id="btn-lapel-left"
+                data-testid="btn-lapel-left"
                 onClick={() => handleSolveGate('left')}
                 className="p-3.5 rounded-2xl bg-red-950/30 border border-red-900/60 hover:border-red-500 text-left transition-all cursor-pointer group"
               >
@@ -886,6 +906,8 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
               </button>
 
               <button
+                id="btn-lapel-right"
+                data-testid="btn-lapel-right"
                 onClick={() => handleSolveGate('right')}
                 className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-900/60 hover:border-emerald-500 text-left transition-all cursor-pointer group"
               >
@@ -975,6 +997,8 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
             </p>
 
             <button
+              id="btn-goto-wardrobe"
+              data-testid="btn-goto-wardrobe"
               onClick={onCompleteGame}
               className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black font-black text-xs shadow-lg shadow-amber-500/30 transition-all cursor-pointer flex items-center justify-center gap-2"
             >
@@ -990,6 +1014,8 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
         {/* Directional Pad */}
         <div className="flex items-center gap-2">
           <button
+            id="vbtn-left"
+            data-testid="vbtn-left"
             onMouseDown={() => pressVirtualKey('V_LEFT')}
             onMouseUp={() => releaseVirtualKey('V_LEFT')}
             onTouchStart={() => pressVirtualKey('V_LEFT')}
@@ -1001,6 +1027,8 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
           </button>
 
           <button
+            id="vbtn-right"
+            data-testid="vbtn-right"
             onMouseDown={() => pressVirtualKey('V_RIGHT')}
             onMouseUp={() => releaseVirtualKey('V_RIGHT')}
             onTouchStart={() => pressVirtualKey('V_RIGHT')}
@@ -1014,6 +1042,8 @@ export const DetKyUcGame: React.FC<DetKyUcGameProps> = ({
 
         {/* Jump Action */}
         <button
+          id="vbtn-jump"
+          data-testid="vbtn-jump"
           onMouseDown={() => pressVirtualKey('V_JUMP')}
           onMouseUp={() => releaseVirtualKey('V_JUMP')}
           onTouchStart={() => pressVirtualKey('V_JUMP')}
